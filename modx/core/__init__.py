@@ -6,7 +6,7 @@ This module re-exports the main core classes so callers can import from
 
 from .analyzer import CodebaseAnalyzer
 from .planner import ModernizationPlanner
-from .migrator import CodeMigrator
+from .migrators.base import CodeMigrator
 
 __all__ = [
 	"CodebaseAnalyzer",

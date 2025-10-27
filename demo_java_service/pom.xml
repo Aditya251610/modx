@@ -1,4 +1,4 @@
-<!-- MODX_DETERMINISTIC_FALLBACK: upgraded pom/java version to 17 and spring-boot -> 3.x when detected -->
+<!-- MODX_DETERMINISTIC_FALLBACK: upgraded to Java 17, Spring Boot 3, and javax→jakarta -->
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
@@ -17,6 +17,8 @@
 
     <properties>
         <java.version>17</java.version>
+        <maven.compiler.source>17</maven.compiler.source>
+        <maven.compiler.target>17</maven.compiler.target>
     </properties>
 
     <dependencies>

@@ -1,4 +1,4 @@
-"""Migrator module moved into core package."""
+"""CodeMigrator main class."""
 
 import os
 import tempfile
@@ -7,21 +7,28 @@ import difflib
 from pathlib import Path
 from typing import Dict, List, Optional
 import click
-from .planner import ModernizationPlanner
-from .analyzer import CodebaseAnalyzer
-from ..ai import AIModernizer
+from ..planner import ModernizationPlanner
+from ..analyzer import CodebaseAnalyzer
+from ...ai import AIModernizer
+from .python_migrator import PythonMigrator
+from .java_migrator import JavaMigrator
+from .js_migrator import JSMigrator
+from .go_migrator import GoMigrator
 import subprocess
 from datetime import datetime, timezone
-import json
-import re
+from .utils import BaseMigrator
 
 
-class CodeMigrator:
+class CodeMigrator(BaseMigrator):
     def __init__(self, service_path: str):
         self.service_path = Path(service_path)
         self.planner = ModernizationPlanner(service_path)
         self.temp_dir = None
         self._drop_step_logged = False
+        self.python_migrator = PythonMigrator()
+        self.java_migrator = JavaMigrator()
+        self.js_migrator = JSMigrator()
+        self.go_migrator = GoMigrator()
 
     def migrate(self, interactive: bool = True, apply: bool = False) -> bool:
         # Use timezone-aware UTC timestamp
@@ -129,24 +136,6 @@ class CodeMigrator:
                 return True
             return any(part in deny_dirs for part in rel.parts)
 
-        def record_change(file_path: Path, change_type: str, old_content: Optional[str], new_content: Optional[str]):
-            try:
-                lines_changed = 0
-                if old_content is not None and new_content is not None:
-                    diff_lines = list(difflib.unified_diff(
-                        (old_content or '').splitlines(keepends=False),
-                        (new_content or '').splitlines(keepends=False),
-                        lineterm=''
-                    ))
-                    lines_changed = sum(1 for l in diff_lines if (l.startswith('+') or l.startswith('-')) and not l.startswith('+++') and not l.startswith('---') and not l.startswith('@@'))
-                changes.append({
-                    'file': str(file_path.relative_to(work_path)),
-                    'type': change_type,
-                    'lines_changed': lines_changed
-                })
-            except Exception:
-                changes.append({'file': str(file_path), 'type': change_type})
-
         ai_mod = None
         try:
             if getattr(self.planner, 'use_ai', False):
@@ -196,7 +185,7 @@ class CodeMigrator:
                     target.parent.mkdir(parents=True, exist_ok=True)
                     try:
                         target.write_text(content, encoding='utf-8')
-                        record_change(target, 'ai_patch', old, content)
+                        self.record_change(target, 'ai_patch', old, content, changes, work_path)
                     except Exception:
                         continue
 
@@ -336,7 +325,7 @@ class CodeMigrator:
                             except Exception:
                                 orig = ''
                             try:
-                                record_change(tgt_path, f'ai_{sid or "patch"}', orig, new)
+                                self.record_change(tgt_path, f'ai_{sid or "patch"}', orig, new, changes, work_path)
                             except Exception:
                                 pass
                         changed_any = True
@@ -347,159 +336,17 @@ class CodeMigrator:
                 if changed_any:
                     continue
 
-            if sid == 'python_print_function':
-                changes.extend(self._fix_python_print_statements(work_path))
-            elif sid == 'add_type_hints':
-                changes.extend(self._add_basic_type_hints(work_path))
-            elif sid == 'update_dependencies':
-                req = work_path / 'requirements.txt'
-                changed = False
-                if req.exists() and not is_denied(req):
-                    try:
-                        old = req.read_text(encoding='utf-8')
-                        lines = []
-                        for ln in old.splitlines():
-                            s = ln.strip()
-                            if not s or s.startswith('#'):
-                                lines.append(ln)
-                                continue
-                            if '==' in s:
-                                name, ver = s.split('==', 1)
-                                if ver.startswith('0.'):
-                                    lines.append(f"{name}>=1.0")
-                                    changed = True
-                                    continue
-                            lines.append(ln)
-                        if changed:
-                            new = '\n'.join(lines) + '\n'
-                            req.write_text(new, encoding='utf-8')
-                            changes.append({'file': str(req.relative_to(work_path)), 'type': 'update_dependencies', 'lines_changed': sum(1 for a,b in zip(old.splitlines(), new.splitlines()) if a!=b)})
-                    except Exception:
-                        pass
-            elif sid == 'es6_syntax':
-                js_files = list(work_path.rglob('*.js'))
-                for jf in js_files:
-                    if is_denied(jf):
-                        continue
-                    try:
-                        old = jf.read_text(encoding='utf-8')
-                        lines = old.splitlines()
-                        modified = False
-                        for i, ln in enumerate(lines):
-                            stripped = ln.lstrip()
-                            if stripped.startswith('var '):
-                                indent = ln[:len(ln)-len(stripped)]
-                                lines[i] = indent + stripped.replace('var ', 'let ', 1)
-                                modified = True
-                        if modified:
-                            new = '\n'.join(lines) + ('\n' if not old.endswith('\n') else '')
-                            jf.write_text(new, encoding='utf-8')
-                            changes.append({'file': str(jf.relative_to(work_path)), 'type': 'es6_syntax', 'lines_changed': sum(1 for a,b in zip(old.splitlines(), new.splitlines()) if a!=b)})
-                    except Exception:
-                        pass
-            elif sid == 'java_modernize':
-                # Deterministic modernization fallback for Java projects.
-                # - Update pom.xml / build.gradle to target Java 17
-                # - Bump Spring Boot parent to 3.x when detectable
-                # - Replace javax.* imports/usages with jakarta.*
-                # - Add a deterministic-fallback marker so users can spot fallback edits
-                java_files = [p for p in work_path.rglob('*.java') if not is_denied(p)]
-
-                # Update Maven pom.xml if present
-                pom_candidates = list(work_path.rglob('pom.xml'))
-                for pom in pom_candidates:
-                    try:
-                        old = pom.read_text(encoding='utf-8')
-                    except Exception:
-                        old = ''
-                    new = old
-
-                    # set java.version property to 17 (use lambda to avoid backreference ambiguity)
-                    new = re.sub(r"(<java.version>\s*)([0-9.]+)(\s*</java.version>)",
-                                 lambda m: f"{m.group(1)}17{m.group(3)}",
-                                 new)
-                    # maven.compiler.source/target -> 17
-                    new = re.sub(r"(<maven.compiler.source>\s*)(1\.8|8)(\s*</maven.compiler.source>)",
-                                 lambda m: f"{m.group(1)}17{m.group(3)}",
-                                 new)
-                    new = re.sub(r"(<maven.compiler.target>\s*)(1\.8|8)(\s*</maven.compiler.target>)",
-                                 lambda m: f"{m.group(1)}17{m.group(3)}",
-                                 new)
-
-                    # If there's a Spring Boot parent, try to bump its version to 3.1.0 if <version> present and not already 3.x
-                    try:
-                        parent_block = re.search(r"<parent>.*?<groupId>\s*org\.springframework\.boot\s*</groupId>.*?<artifactId>\s*spring-boot-starter-parent\s*</artifactId>.*?</parent>", new, flags=re.S)
-                        if parent_block:
-                            pb = parent_block.group(0)
-                            if '<version>' in pb:
-                                pb_new = re.sub(r"(<version>\s*)([0-9.]+)(\s*</version>)", lambda m: (m.group(0) if m.group(2).startswith('3') else f"<version>3.1.0</version>"), pb)
-                                new = new.replace(pb, pb_new)
-                    except Exception:
-                        pass
-
-                    if new != old:
-                        marker = '<!-- MODX_DETERMINISTIC_FALLBACK: upgraded pom/java version to 17 and spring-boot -> 3.x when detected -->\n'
-                        try:
-                            pom.write_text(marker + new, encoding='utf-8')
-                            changes.append({'file': str(pom.relative_to(work_path)), 'type': 'java_modernize', 'lines_changed': max(1, new.count('\n') - old.count('\n'))})
-                        except Exception:
-                            pass
-
-                # Update Gradle build files
-                gradle_files = [p for p in work_path.rglob('build.gradle') if not is_denied(p)]
-                for gf in gradle_files:
-                    try:
-                        old = gf.read_text(encoding='utf-8')
-                    except Exception:
-                        old = ''
-                    new = old
-                    # sourceCompatibility = 1.8 -> 17
-                    new = re.sub(r"(sourceCompatibility\s*=\s*)(1\.8|\"1\.8\"|JavaVersion\.VERSION_1_8)",
-                                 lambda m: f"{m.group(1)}17",
-                                 new)
-                    new = re.sub(r"(targetCompatibility\s*=\s*)(1\.8|\"1\.8\"|JavaVersion\.VERSION_1_8)",
-                                 lambda m: f"{m.group(1)}17",
-                                 new)
-                    # JavaVersion.VERSION_1_8 -> JavaVersion.VERSION_17
-                    new = new.replace('JavaVersion.VERSION_1_8', 'JavaVersion.VERSION_17')
-
-                    if new != old:
-                        marker = '// MODX_DETERMINISTIC_FALLBACK: upgraded Gradle java compatibility to 17\n'
-                        try:
-                            gf.write_text(marker + new, encoding='utf-8')
-                            changes.append({'file': str(gf.relative_to(work_path)), 'type': 'java_modernize', 'lines_changed': max(1, new.count('\n') - old.count('\n'))})
-                        except Exception:
-                            pass
-
-                # Replace javax.* with jakarta.* in Java source files (safe textual replacement)
-                for jf in java_files:
-                    try:
-                        old = jf.read_text(encoding='utf-8')
-                    except Exception:
-                        old = ''
-                    if not old:
-                        continue
-                    if 'MODX_DETERMINISTIC_FALLBACK' in old:
-                        continue
-
-                    new = old
-                    # Replace import statements
-                    new = re.sub(r"\bimport\s+javax\.", 'import jakarta.', new)
-                    # Replace fully-qualified usages
-                    new = re.sub(r"\bjavax\.(servlet|persistence|annotation|validation|ws)\.", lambda m: 'jakarta.' + m.group(1) + '.', new)
-                    # Replace common package roots
-                    new = new.replace('javax.', 'jakarta.')
-
-                    # Attempt a few safe modernizations: prefer try-with-resources (no-op textual hint), leave heavy refactors to AI
-                    if new != old:
-                        marker = '/* MODX_DETERMINISTIC_FALLBACK: converted javax.* -> jakarta.* and targeted Java 17 compatibility */\n'
-                        try:
-                            jf.write_text(marker + new, encoding='utf-8')
-                            changes.append({'file': str(jf.relative_to(work_path)), 'type': 'java_modernize', 'lines_changed': max(1, new.count('\n') - old.count('\n'))})
-                        except Exception:
-                            pass
-            elif sid == 'go_modules':
-                continue
+            # Delegate to language-specific migrators
+            migrator_map = {
+                'python_print_function': self.python_migrator,
+                'add_type_hints': self.python_migrator,
+                'update_dependencies': self.python_migrator,
+                'es6_syntax': self.js_migrator,
+                'java_modernize': self.java_migrator,
+                'go_modules': self.go_migrator,
+            }
+            if sid in migrator_map:
+                changes.extend(migrator_map[sid].handle_step(sid, work_path, norm_targets, changes))
 
         seen = set()
         final_changes: List[Dict] = []
@@ -515,83 +362,6 @@ class CodeMigrator:
                 final_changes.append(c)
 
         return final_changes
-
-    def _fix_python_print_statements(self, work_path: Path) -> List[Dict]:
-        changes = []
-        py_files = list(work_path.rglob("*.py"))
-        for py_file in py_files:
-            try:
-                with open(py_file, 'r', encoding='utf-8') as f:
-                    content = f.read()
-                lines = content.split('\n')
-                modified = False
-                for i, line in enumerate(lines):
-                    stripped = line.strip()
-                    if stripped.startswith('print ') and not stripped.endswith(')'):
-                        lines[i] = line.replace('print ', 'print(', 1) + ')'
-                        modified = True
-                if modified:
-                    new_content = '\n'.join(lines)
-                    if '-> Any' in new_content and 'from typing import Any' not in new_content:
-                        insert_index = 0
-                        if new_content.startswith('#!'):
-                            idx = new_content.find('\n')
-                            insert_index = idx + 1 if idx != -1 else 0
-                        new_content = new_content[:insert_index] + 'from typing import Any\n\n' + new_content[insert_index:]
-                    with open(py_file, 'w', encoding='utf-8') as f:
-                        f.write(new_content)
-                    changes.append({
-                        'file': str(py_file.relative_to(work_path)),
-                        'type': 'python_print_fix',
-                        'lines_changed': sum(1 for old, new in zip(content.split('\n'), new_content.split('\n')) if old != new)
-                    })
-            except:
-                pass
-        return changes
-
-    def _add_basic_type_hints(self, work_path: Path) -> List[Dict]:
-        changes = []
-        py_files = list(work_path.rglob("*.py"))
-        for py_file in py_files[:2]:
-            try:
-                with open(py_file, 'r', encoding='utf-8') as f:
-                    content = f.read()
-                lines = content.split('\n')
-                modified = False
-                for i, line in enumerate(lines):
-                    stripped = line.strip()
-                    if stripped.startswith('def ') and '->' not in line and stripped.endswith(':'):
-                        indent = len(line) - len(line.lstrip(' '))
-                        has_return = False
-                        for j in range(i+1, len(lines)):
-                            l = lines[j]
-                            if l.strip().startswith('def ') and (len(l) - len(l.lstrip(' ')) )<= indent:
-                                break
-                            if 'return ' in l.strip():
-                                has_return = True
-                                break
-                        if has_return:
-                            continue
-                        lines[i] = line.replace('):', ') -> Any:', 1)
-                        modified = True
-                if modified:
-                    new_content = '\n'.join(lines)
-                    if '-> Any' in new_content and 'from typing import Any' not in new_content:
-                        insert_index = 0
-                        if new_content.startswith('#!'):
-                            idx = new_content.find('\n')
-                            insert_index = idx + 1 if idx != -1 else 0
-                        new_content = new_content[:insert_index] + 'from typing import Any\n\n' + new_content[insert_index:]
-                    with open(py_file, 'w', encoding='utf-8') as f:
-                        f.write(new_content)
-                    changes.append({
-                        'file': str(py_file.relative_to(work_path)),
-                        'type': 'type_hints',
-                        'lines_changed': 1
-                    })
-            except:
-                pass
-        return changes
 
     def _show_colorized_diff(self, original_path: Path, modified_path: Path, changes: Optional[List[Dict]] = None, plan: Optional[Dict] = None):
         click.echo("Changes Preview:")
@@ -695,7 +465,7 @@ class CodeMigrator:
                 click.echo("- Running tests (pytest)...")
                 proc = subprocess.run([pytest_bin, '-q', '--maxfail=1'], cwd=str(work_path), capture_output=True, text=True)
                 if proc.returncode != 0:
-                    combined = ((proc.stdout or '') + '\n' + (proc.stderr or '')).lower()
+                    combined = ((proc.stdout or '') + '\n' + (proc.stderr or '')).strip()
                     if proc.returncode == 5 or 'collected 0' in combined or 'no tests ran' in combined:
                         click.echo("- No tests were collected (ok).")
                     else:
@@ -804,8 +574,8 @@ class CodeMigrator:
                     l = line.strip()
                     if not l or l.startswith('#'):
                         continue
-                    if l.endswith('/'):
-                        deny_dirs.add(l[:-1])
+                        if l.endswith('/'):
+                            deny_dirs.add(l[:-1])
         except Exception:
             pass
 
@@ -900,3 +670,32 @@ class CodeMigrator:
     def cleanup(self):
         if self.temp_dir and self.temp_dir.exists():
             shutil.rmtree(self.temp_dir)
+
+    def auto_fix_whitespace(self, work_path: Path):
+        py_files = list(work_path.rglob('*.py'))
+        for py_file in py_files:
+            try:
+                text = py_file.read_text(encoding='utf-8')
+                lines = text.splitlines()
+                modified = False
+                i = 0
+                while i < len(lines):
+                    line = lines[i]
+                    if (line.startswith('def ') or line.startswith('async def ')) and (len(line) - len(line.lstrip(' ')) == 0):
+                        j = i - 1
+                        blank_count = 0
+                        while j >= 0 and lines[j].strip() == '':
+                            blank_count += 1
+                            j -= 1
+                        if blank_count < 2:
+                            insert_at = i - blank_count
+                            for _ in range(2 - blank_count):
+                                lines.insert(insert_at, '')
+                            modified = True
+                            i += (2 - blank_count)
+                    i += 1
+                if modified:
+                    new = '\n'.join(lines) + '\n'
+                    py_file.write_text(new, encoding='utf-8')
+            except Exception:
+                pass

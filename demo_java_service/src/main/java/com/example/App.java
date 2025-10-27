@@ -1,4 +1,3 @@
-/* MODX_DETERMINISTIC_FALLBACK: converted javax.* -> jakarta.* and targeted Java 17 compatibility */
 package com.example;
 
 import jakarta.servlet.http.HttpServletRequest;
