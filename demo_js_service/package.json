@@ -1,0 +1,19 @@
+{
+  "name": "demo-js-service",
+  "version": "1.0.0",
+  "description": "Legacy JavaScript microservice example",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "express": "^0.17.1",
+    "lodash": "^0.17.20"
+  },
+  "devDependencies": {
+    "mocha": "^8.4.0"
+  },
+  "engines": {
+    "node": ">=14"
+  }
+}

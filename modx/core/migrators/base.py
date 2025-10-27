@@ -7,6 +7,7 @@ import difflib
 from pathlib import Path
 from typing import Dict, List, Optional
 import click
+import re
 from ..planner import ModernizationPlanner
 from ..analyzer import CodebaseAnalyzer
 from ...ai import AIModernizer
@@ -346,7 +347,7 @@ class CodeMigrator(BaseMigrator):
                 'go_modules': self.go_migrator,
             }
             if sid in migrator_map:
-                changes.extend(migrator_map[sid].handle_step(sid, work_path, norm_targets, changes))
+                changes.extend(migrator_map[sid].handle_step(sid, work_path, norm_targets, changes, self.service_path))
 
         seen = set()
         final_changes: List[Dict] = []
@@ -365,7 +366,7 @@ class CodeMigrator(BaseMigrator):
 
     def _show_colorized_diff(self, original_path: Path, modified_path: Path, changes: Optional[List[Dict]] = None, plan: Optional[Dict] = None):
         click.echo("Changes Preview:")
-        exts = ['*.py', '*.js', '*.json', '*.ts', '*.java', '*.go', '*.xml', 'pom.xml', 'package.json']
+        exts = ['*.py', '*.js', '*.json', '*.ts', '*.java', '*.go', '*.xml', 'pom.xml', 'package.json', 'go.mod', 'requirements.txt']
         candidates = []
         for pat in exts:
             candidates.extend(list(original_path.rglob(pat)))
@@ -458,6 +459,36 @@ class CodeMigrator(BaseMigrator):
             click.echo(click.style('❌ Syntax errors detected:', fg='red', bold=True))
             for p, e in syntax_errors:
                 click.echo(f"- {p.relative_to(work_path)}: {e}")
+
+        # Post-validation for other languages
+        from .utils import SafeAggressiveTransformer
+
+        # JavaScript/TypeScript validation
+        js_files = list(work_path.rglob('*.js')) + list(work_path.rglob('*.ts'))
+        if js_files:
+            click.echo("- Checking JavaScript/TypeScript syntax...")
+            transformer = SafeAggressiveTransformer(work_path, 'javascript')
+            if not transformer.run_post_validation():
+                success = False
+                click.echo(click.style('❌ JavaScript/TypeScript validation failed.', fg='red'))
+
+        # Java validation
+        java_files = list(work_path.rglob('*.java'))
+        if java_files:
+            click.echo("- Checking Java syntax...")
+            transformer = SafeAggressiveTransformer(work_path, 'java')
+            if not transformer.run_post_validation():
+                success = False
+                click.echo(click.style('❌ Java validation failed.', fg='red'))
+
+        # Go validation
+        go_files = list(work_path.rglob('*.go'))
+        if go_files:
+            click.echo("- Checking Go syntax...")
+            transformer = SafeAggressiveTransformer(work_path, 'go')
+            if not transformer.run_post_validation():
+                success = False
+                click.echo(click.style('❌ Go validation failed.', fg='red'))
 
         try:
             pytest_bin = shutil.which('pytest')
@@ -588,7 +619,7 @@ class CodeMigrator(BaseMigrator):
                 if l.endswith('/'):
                     deny_dirs.add(l[:-1])
 
-        allowed_exts = {'.py', '.js', '.ts', '.java', '.go', '.json', '.toml', '.md', '.ini', '.cfg', '.yml', '.yaml', '.xml'}
+        allowed_exts = {'.py', '.js', '.ts', '.java', '.go', '.json', '.toml', '.md', '.ini', '.cfg', '.yml', '.yaml', '.xml', '.txt', '.mod'}
 
         service_root_resolved = self.service_path.resolve()
 
