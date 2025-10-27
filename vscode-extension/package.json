@@ -1,0 +1,66 @@
+{
+    "name": "modx-vscode",
+    "displayName": "ModX - Codebase Modernizer",
+    "description": "VS Code extension for ModX autonomous codebase modernization",
+    "version": "0.1.0",
+    "engines": {
+        "vscode": "^1.74.0"
+    },
+    "categories": [
+        "Other"
+    ],
+    "activationEvents": [
+        "onCommand:modx.analyze",
+        "onCommand:modx.plan",
+        "onCommand:modx.migrate"
+    ],
+    "main": "./out/extension.js",
+    "contributes": {
+        "commands": [
+            {
+                "command": "modx.analyze",
+                "title": "ModX: Analyze Codebase"
+            },
+            {
+                "command": "modx.plan",
+                "title": "ModX: Plan Modernization"
+            },
+            {
+                "command": "modx.migrate",
+                "title": "ModX: Migrate Codebase"
+            }
+        ],
+        "menus": {
+            "explorer/context": [
+                {
+                    "command": "modx.analyze",
+                    "when": "explorerResourceIsFolder",
+                    "group": "7_modification"
+                },
+                {
+                    "command": "modx.plan",
+                    "when": "explorerResourceIsFolder",
+                    "group": "7_modification"
+                },
+                {
+                    "command": "modx.migrate",
+                    "when": "explorerResourceIsFolder",
+                    "group": "7_modification"
+                }
+            ]
+        }
+    },
+    "scripts": {
+        "vscode:prepublish": "npm run compile",
+        "compile": "tsc -p ./",
+        "watch": "tsc -watch -p ./",
+        "pretest": "npm run compile && npm run lint",
+        "lint": "eslint src --ext ts"
+    },
+    "devDependencies": {
+        "@types/vscode": "^1.74.0",
+        "@types/node": "16.x",
+        "eslint": "^8.28.0",
+        "typescript": "^4.9.4"
+    }
+}

@@ -1,0 +1,80 @@
+# Virtual environment
+.venv/
+venv/
+env/
+
+demo_python_service/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# ModX artifacts and backups
+.modx_artifacts/
+*.modx_backup
+
+# Temporary files and caches
+.pytest_cache/
+.cache/
+tmp/
+temp/
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Packaging
+dist/
+build/
+
+# Maven / Java
+target/
+*.class
+*.jar
+pom.xml.modx_backup
+
+# Docker
+Dockerfile
+.dockerignore
+
+# Editor/IDE
+*.sublime-workspace
+*.sublime-project
+
+# Secrets
+.env
+.env.local
+secrets.yml
