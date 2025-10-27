@@ -1,0 +1,19 @@
+# Exclude venv, caches, builds, demos, and node artifacts
+.venv/
+venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+node_modules/
+npm-debug.log
+.yarnrc
+.DS_Store
+.git/
+.gitignore
+demo_*/
+tests/
+.vscode/
+.github/
+*.modx_backup

@@ -1,0 +1,36 @@
+{
+  "name": "modx-cli",
+  "version": "0.1.2",
+  "description": "ModX CLI wrapper (node) - forwards commands to the Python-based ModX CLI",
+  "keywords": [
+    "modx",
+    "modernizer",
+    "cli",
+    "python",
+    "wrapper"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Aditya251610/modx.git"
+  },
+  "author": "ModX Team <team@example.com>",
+  "license": "MIT",
+  "bin": {
+    "modx": "bin/modx.js"
+  },
+  "preferGlobal": true,
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "bin/",
+    "README.md",
+    "modx/**/*.py",
+    "pyproject.toml",
+    "package.json"
+  ],
+  "type": "module",
+  "engines": {
+    "node": ">=14"
+  }
+}

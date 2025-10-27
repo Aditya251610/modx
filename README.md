@@ -47,143 +47,156 @@ ModX is a production-grade Python CLI AI agent that safely modernizes legacy cod
 
 ## Installation
 
-1. Clone the repository
-2. Create and activate virtual environment:
-   ```bash
-   python3 -m venv .venv
-   source .venv/bin/activate  # Linux/macOS
-   # ModX — Autonomous Codebase Modernizer
+# ModX — Autonomous Codebase Modernizer
 
-   ModX is a CLI-first developer tool that helps you modernize codebases safely. It uses deterministic rules and an optional local LLM (Ollama-like) to suggest modernizations, but it will never apply changes without an explicit final approval from the user.
+ModX is a Python-based CLI agent that helps modernize codebases across multiple languages (Python, JavaScript/TypeScript, Java, Go) using an AI-first workflow with a deterministic, safe fallback for automated modernization. This repository also includes a tiny Node wrapper so the tooling can be exposed as an npm-installed global CLI named `modx`.
 
-   Key principles
-   - Enforce a Python virtual environment (.venv) before running.
-   - AI-first planning when enabled, but automatic deterministic fallback if the AI returns nothing actionable.
-   - Strict unified-diff policy for AI patches: AI must return git-style diffs; diffs are validated with `git apply --check` before use.
-   - Safety: all changes are applied to a temporary copy, validated, and only applied to the real tree after an explicit `y` confirmation.
+Contents
+--------
+- Quick start
+- Technical overview
+- Design & safety model
+- CLI usage
+- Deterministic fallback details
+- Developer setup & tests
+- NPM wrapper and publishing
+- Contributing
+- License & contact
 
-   Table of contents
-   - What ModX does
-   - Quick start (local developer)
-   - Commands and examples
-   - AI configuration
-   - Validation & linting notes
-   - Artifacts and auditing
-   - Project layout & contributions
+Quick start
+-----------
+1) Create and activate a Python virtual environment (recommended):
 
-   What ModX does
-   ----------------
-   - Analyzes a service or repository for languages, frameworks, and outdated patterns.
-   - Produces a modernization plan (AI-first by default). If AI produces zero actionable steps, ModX falls back to deterministic rule-based planning automatically.
-   - For each planned step, it attempts to obtain AI-generated unified diffs (strict git-style). If the AI cannot produce a valid diff, ModX uses conservative deterministic handlers as a fallback.
-   - Applies changes to a temporary workspace, runs validators (syntax, pytest, flake8), then prompts the user to apply the changes to the original codebase. Backups are created when applying.
+```bash
+python3 -m venv .venv
+source .venv/bin/activate   # Linux / macOS
+# On Windows PowerShell: .venv\Scripts\Activate.ps1
+```
 
-   Quick start (developer machine)
-   --------------------------------
-   1. Clone repository and enter project root.
-   2. Create & activate a virtualenv (required):
+2) Install ModX in editable mode (developer flow):
 
-   ```bash
-   python3 -m venv .venv
-   source .venv/bin/activate   # Linux / macOS
-   # On Windows PowerShell:
-   # .venv\Scripts\Activate.ps1
-   ```
+```bash
+pip install -e .
+```
 
-   3. Install the package in editable mode (recommended):
+3) Run the CLI (examples):
 
-   ```bash
-   pip install -e .
-   ```
+```bash
+# Show plan
+python -m modx.cli planner --service /path/to/service
 
-   4. (Optional) Provide a local Ollama-like model server if you want AI features. See AI configuration below.
+# Preview deterministic-only modernization
+python -m modx.cli migrate --service /path/to/service --no-ai
 
-   Commands (exact usage)
-   -----------------------
-   The CLI is exposed via the package entrypoint. Use the `python -m modx.cli` module to run commands exactly as shipped in this repo.
+# Apply deterministic modernization non-interactively
+python -m modx.cli migrate --service /path/to/service --no-ai --apply
+```
 
-   - Planner (generate a plan, no changes):
+Technical overview
+------------------
+- Language support: Python, JavaScript/TypeScript, Java, Golang
+- Core Python modules: click (CLI), ast/regex (transforms), subprocess (tooling)
+- Per-language migrators live under `modx/core/migrators/`
+- Shared utilities: `modx/core/migrators/utils.py` (markers, validators, safety helpers)
 
-   ```bash
-   python -m modx.cli planner --service <path/to/service> [--no-ai]
-   ```
+Design & safety model
+---------------------
+ModX follows a conservative safety-first approach:
 
-   - Migrator (preview, validate, and optionally apply):
+- AI-first plan generation. If AI returns diffs, ModX validates with `git apply --check` before applying.
+- If AI cannot produce valid diffs, ModX runs deterministic, conservative language-specific transforms as a fallback.
+- DROP_STEP enforcement: any step that references non-existent files is logged and skipped (STRICT message).
+- Idempotency: every fallback adds a top-of-file marker (e.g., `# MODX_DETERMINISTIC_FALLBACK: ...`) and skips files already containing the marker.
+- No new file creation from deterministic fallback. Only existing files are modified.
 
-   ```bash
-   python -m modx.cli migrate --service <path/to/service> [--no-ai] [--apply]
-   ```
+CLI usage
+---------
+The canonical entrypoint is the Python module `modx.cli`. For convenience, this repository also provides a tiny Node wrapper so the Python CLI can be exposed via npm as a global `modx` command.
 
-   Notes:
-   - `--no-ai` forces deterministic planning (useful for testing).
-   - `--apply` tells the migrator to apply changes after approval in non-interactive runs; when running interactively the tool will always prompt `y/n` before applying.
-   - The CLI enforces that a virtualenv is active; it will abort with instructions if you forgot to `source .venv/bin/activate`.
+Common commands (Python):
 
-   AI configuration
-   -----------------
-   - ModX expects a local Ollama-like runtime at http://localhost:11434 by default. You can configure the model via the `OLLAMA_MODEL` environment variable. Example:
+```bash
+python -m modx.cli planner --service <path>      # produce a modernization plan (AI-first)
+python -m modx.cli migrate --service <path>      # preview, validate, optionally apply
+python -m modx.cli migrate --service <path> --no-ai --apply  # deterministic fallback, apply
+```
 
-   ```bash
-   export OLLAMA_MODEL=codegemma:2b
-   # or use a stronger model if you have the RAM and it supports code generation
-   export OLLAMA_MODEL=codellama:2b
-   ```
+Deterministic fallback details
+-----------------------------
+Per-language conservative transforms implemented in `modx/core/migrators`:
 
-   - The AI integration is tolerant: it will attempt to parse JSON responses, but for diffs we require a strict git unified-diff. If the model cannot produce a valid diff, ModX will retry once with a stricter prompt and then fall back to deterministic handlers.
+- Python: Py2 print -> print(), add `-> Any` for functions without explicit return, ensure 2 blank lines before top-level defs, bump pinned `package==0.x` to `package>=1.0` in `requirements.txt`.
+- JS/TS: `var` -> `let/const` (conservative), string concat -> template literals (simple cases), convert function expressions to arrow functions when safe, bump `^0.*` / `~0.*` to `^1.0.0` in `package.json`.
+- Go: bump `go` directive to `1.22` if older, run `gofmt`, `go mod tidy`, and `go vet` (post-validation).
+- Java: aggressive modernization path already present (Spring Boot / Java version updates) and remains unchanged.
 
-   Validators and linting
-   ---------------------
-   - ModX runs a set of validators in the temporary workspace before asking for final approval:
-      - Python syntax checks (compile())
-      - pytest (if `pytest` is installed; no-tests-collected is treated as OK)
-      - flake8 (if installed)
+Post-validation rules
+---------------------
+- Python: compile all `.py` files; run `pytest` if available; run `flake8` (E3xx codes are warnings, F*** and SyntaxError-like outputs block); run `mypy` if present (blocking for fatal errors).
+- JS/TS: run `eslint` with `--max-warnings=0` if available (errors block).
+- Go: run `go vet ./...` if `go` toolchain is present (failures block).
+- Java: `mvn validate` if Maven is available.
 
-   - Flake8 behavior: cosmetic E3xx issues (blank-line and spacing rules such as E302, E303, E305) are considered non-blocking and will be shown as a warning but will not abort the migration. Serious codes (Fxxx like F401, F821, etc.) and syntax/traceback errors are still blocking.
+Developer setup & tests
+-----------------------
+1. Create venv and install in editable mode:
 
-   Artifacts and auditing
-   ----------------------
-   - All AI diff attempts and important artifacts are saved under the temporary workspace in:
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .
+```
 
-      .modx_artifacts/ai_diffs/<TIMESTAMP>/step_<id>_attempt_<n>.diff
+2. Run unit tests:
 
-   - A single audit timestamp is used per migrate run so all attempts are grouped under a single folder.
+```bash
+pytest -q
+```
 
-   Safety & backups
-   -----------------
-   - Changes are applied to a temporary copy first. Validators run there. Only after the user confirms will ModX copy modified files back to the original service and create backups with the `.modx_backup` extension.
-   - To remove backups after you're satisfied:
+3. Try deterministic migrations on demos in the repository:
 
-   ```bash
-   find . -name '*.modx_backup' -delete
-   ```
+```bash
+python -m modx.cli migrate --service demo_python_service --no-ai --apply
+python -m modx.cli migrate --service demo_js_service --no-ai --apply
+python -m modx.cli migrate --service demo_go_service --no-ai --apply
+python -m modx.cli migrate --service demo_java_service --no-ai --apply
+```
 
-   Behavior details
-   ----------------
-   - AI-first planning: when AI is enabled ModX asks the model to generate steps. If AI returns zero actionable steps, ModX will automatically fallback to deterministic planning and clearly label any deterministic patches in the preview as:
+NPM wrapper & publishing
+------------------------
+This repository includes a minimal Node wrapper at `bin/modx.js` and a `package.json` so you can publish a tiny npm package that exposes the `modx` shell command. The Node wrapper simply locates a Python 3 runtime (tries `python3`, `python`, then `py -3` on Windows) and forwards arguments to `python -m modx.cli`.
 
-      🔁 DETERMINISTIC FALLBACK (AI did not return actionable steps)
+To test locally without publishing:
 
-   - When AI-generated patches are used they are labeled:
+```bash
+# From repository root
+npm link
 
-      🔧 AI-GENERATED PATCH (STRICT DIFF MODE)
+# Now `modx` will run the wrapper which forwards to Python
+modx migrate --service /full/path/to/demo_python_service --no-ai --apply
 
-   - The tool requires `git` to validate and apply AI unified diffs (via `git apply --check` / `git apply`). If `git` is not available, AI diffs are not used and deterministic handlers are used.
+# When finished
+npm unlink
+```
 
-   Demo services
-   -------------
-   - This repository includes demo services under the `demo_*` directories for local testing (these are listed in `.gitignore` by default and are not intended to be committed back to your source repos). Keep them local when experimenting.
+To publish to npm (requires npm account):
 
-   Troubleshooting
-   ---------------
-   - If the AI is not available, set `OLLAMA_MODEL` appropriately and ensure your local Ollama server is running.
-   - If AI diffs frequently fail validation, try a different model or check the saved `.modx_artifacts/ai_diffs` files to inspect raw AI output.
-   - If flake8 blocks a migration, inspect the linter output; style-only E3xx codes are warnings and will not block.
+```bash
+npm login
+# Optionally bump version in package.json
+npm publish --access public
+```
 
-   Development & contribution
-   --------------------------
-   - This project uses Python 3 and requires a virtualenv for development. Run tests with `pytest`.
-   - Keep changes small and run the migration flow on a disposable demo service when experimenting.
+Important: the published npm package is only a launcher — it does NOT include the Python runtime or install the Python package for you. Users must have Python 3 and the ModX Python package available on their PATH or virtual environment.
 
-   License
-   -------
-   MIT
+Contributing
+------------
+- Open issues and PRs are welcome. Please run tests and keep changes focused.
+
+License
+-------
+MIT
+
+Contact
+-------
+ModX Team — https://github.com/Aditya251610/modx
