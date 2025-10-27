@@ -1,14 +1,11 @@
-"""
-Analyzer module for ModX
-Detects frameworks, versions, and outdated issues in codebases.
-"""
-
+"""Analyzer module moved into core package."""
 import os
 import json
 import yaml
 from pathlib import Path
 from typing import Dict, List, Optional
-from .ai import AIModernizer
+from ..ai import AIModernizer
+
 
 class CodebaseAnalyzer:
     def __init__(self, root_path: str = ".", use_ai: bool = True) -> None:
@@ -17,7 +14,6 @@ class CodebaseAnalyzer:
         self.ai_modernizer = AIModernizer() if use_ai else None
 
     def analyze(self) -> Dict:
-        """Analyze the codebase and return findings."""
         findings = {
             "languages": self._detect_languages(),
             "frameworks": self._detect_frameworks(),
@@ -26,7 +22,6 @@ class CodebaseAnalyzer:
             "service_path": str(self.root_path)
         }
 
-        # Generate summary
         findings["summary"] = {
             "total_files": self._count_files(),
             "languages_detected": list(findings["languages"].keys()),
@@ -34,7 +29,6 @@ class CodebaseAnalyzer:
             "issues_found": len(findings["outdated_issues"])
         }
 
-        # Enhance with AI if available
         if self.use_ai and self.ai_modernizer:
             findings = self.ai_modernizer.enhance_analysis(findings)
             findings["summary"]["ai_enhanced"] = findings.get("ai_enhanced", False)
@@ -42,7 +36,6 @@ class CodebaseAnalyzer:
         return findings
 
     def _detect_languages(self) -> Dict[str, List[str]]:
-        """Detect programming languages used."""
         languages = {}
         extensions = {
             "python": [".py", ".pyw"],
@@ -57,15 +50,13 @@ class CodebaseAnalyzer:
             for ext in exts:
                 files.extend(list(self.root_path.rglob(f"*{ext}")))
             if files:
-                languages[lang] = [str(f.relative_to(self.root_path)) for f in files[:5]]  # Sample
+                languages[lang] = [str(f.relative_to(self.root_path)) for f in files[:5]]
 
         return languages
 
     def _detect_frameworks(self) -> Dict[str, str]:
-        """Detect frameworks based on config files."""
         frameworks = {}
 
-        # Python
         if (self.root_path / "requirements.txt").exists():
             frameworks["python"] = "Generic Python"
         if (self.root_path / "pyproject.toml").exists():
@@ -73,7 +64,6 @@ class CodebaseAnalyzer:
         if (self.root_path / "setup.py").exists():
             frameworks["python"] = "Setuptools Python"
 
-        # Node.js
         if (self.root_path / "package.json").exists():
             try:
                 with open(self.root_path / "package.json") as f:
@@ -92,25 +82,21 @@ class CodebaseAnalyzer:
             except:
                 frameworks["javascript"] = "Node.js"
 
-        # Java
         if (self.root_path / "pom.xml").exists():
             frameworks["java"] = "Maven"
         if (self.root_path / "build.gradle").exists():
             frameworks["java"] = "Gradle"
 
-        # Go
         if (self.root_path / "go.mod").exists():
             frameworks["golang"] = "Go Modules"
 
         return frameworks
 
     def _detect_outdated_issues(self) -> List[Dict]:
-        """Detect potential outdated patterns and issues."""
         issues = []
 
-        # Check for old Python patterns
         py_files = list(self.root_path.rglob("*.py"))
-        for py_file in py_files[:10]:  # Sample check
+        for py_file in py_files[:10]:
             try:
                 with open(py_file, 'r', encoding='utf-8') as f:
                     content = f.read()
@@ -123,7 +109,6 @@ class CodebaseAnalyzer:
             except:
                 pass
 
-        # Check package.json for old versions
         pkg_path = self.root_path / "package.json"
         if pkg_path.exists():
             try:
@@ -143,7 +128,6 @@ class CodebaseAnalyzer:
         return issues
 
     def _count_files(self) -> int:
-        """Count total source files."""
         extensions = ['.py', '.js', '.ts', '.java', '.go', '.jsx', '.tsx']
         count = 0
         for ext in extensions:

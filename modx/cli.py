@@ -7,8 +7,7 @@ Minimal CLI with three commands: help, planner, migrate.
 import sys
 import os
 import click
-from .planner import ModernizationPlanner
-from .migrator import CodeMigrator
+from .core import ModernizationPlanner, CodeMigrator
 
 
 def check_venv():

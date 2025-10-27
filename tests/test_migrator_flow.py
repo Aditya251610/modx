@@ -27,8 +27,8 @@ if 'click' not in sys.modules:
     fake_click.prompt = _prompt
     sys.modules['click'] = fake_click
 
-from modx.migrator import CodeMigrator
-from modx.planner import ModernizationPlanner
+from modx.core.migrator import CodeMigrator
+from modx.core.planner import ModernizationPlanner
 
 
 def create_demo_service(tmp_path: Path, with_print2=False, with_bad_syntax=False):

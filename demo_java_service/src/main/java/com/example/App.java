@@ -1,0 +1,24 @@
+/* MODX_DETERMINISTIC_FALLBACK: converted javax.* -> jakarta.* and targeted Java 17 compatibility */
+package com.example;
+
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+@SpringBootApplication
+public class App {
+    public static void main(String[] args) {
+        SpringApplication.run(App.class, args);
+    }
+}
+
+@RestController
+class HelloController {
+    @GetMapping("/")
+    public String hello(HttpServletRequest req, HttpServletResponse res) {
+        return "Hello from legacy Spring Boot 2 style with jakarta.servlet imports";
+    }
+}
